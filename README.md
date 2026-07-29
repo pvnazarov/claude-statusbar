@@ -43,10 +43,18 @@ Colors: green → orange → yellow → red as any meter fills.
 
 3. Start (or restart) Claude Code — the bar renders under the prompt.
 
+> **On Windows, follow [`claude-statusbar-windows-setup.md`](claude-statusbar-windows-setup.md) instead.**
+> The steps above need three changes: bare `bash` resolves to the WSL launcher
+> rather than Git Bash, `jq` usually isn't on the PATH the status bar actually
+> inherits, and `git clone` checks the script out with CRLF endings. All three
+> fail silently — the bar renders with everything missing.
+
 ## Requirements
 
 - `bash`, `jq`, `curl`, `git`, `date` (standard on macOS and most Linux distros)
 - Works on macOS (BSD `date`) and Linux (GNU `date`) — both code paths are handled.
+- Windows: works under Git Bash, but needs setup — see
+  [`claude-statusbar-windows-setup.md`](claude-statusbar-windows-setup.md).
 
 ## How rate-limit data works
 
