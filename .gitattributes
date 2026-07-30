@@ -1,0 +1,5 @@
+# Shell scripts must keep LF endings or they break on any POSIX shell,
+# including Git Bash: CRLF fails on the shebang and then on every line with
+# "$'\r': command not found". This overrides core.autocrlf on checkout, so a
+# Windows clone or pull gets LF regardless of the user's global config.
+*.sh text eol=lf
