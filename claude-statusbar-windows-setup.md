@@ -346,7 +346,7 @@ PATH:
 | `jq` | winget `jqlang.jq` | the one that's typically missing |
 | `curl` | Git `mingw64\bin` | API fallback only |
 | `git` | Git `cmd` | branch/dirty indicator |
-| `date`, `sed`, `tr`, `awk`, `basename`, `stat` | Git `usr\bin` | present by default |
+| `date`, `sed`, `tr`, `awk`, `basename`, `stat`, `wc` | Git `usr\bin` | present by default |
 
 The script handles both BSD (`date -j -r`) and GNU (`date -d @`) date syntax, so
 the Git Bash GNU path works without modification. `ps -o args=` (used to detect

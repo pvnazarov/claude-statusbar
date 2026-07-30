@@ -22,6 +22,28 @@ reset='\033[0m'
 
 sep=" ${dim}│${reset} "
 
+# ── Anti-shrink padding ─────────────────────────────────
+# A status-line renderer that draws a shorter string than the previous render
+# leaves the tail of that previous render on screen — see
+# tools/term-test.sh case D, where "value=123456" redrawn as "value=1" still
+# reads "value=123456". It looks like "spaces don't paint", but really nothing
+# was written over those cells at all.
+#
+# So: every variable-width field below is padded to a fixed width (keeping each
+# field at a constant column), and the finished line is padded to the widest it
+# has been this session (so the total never shrinks either).
+#
+# Set SL_NO_PAD=1 to turn this off and compare.
+pad=true
+[ "${SL_NO_PAD:-0}" = "1" ] && pad=false
+
+padstr() { # value, width — left-justified, never truncates
+    if $pad; then printf "%-${2}s" "$1"; else printf '%s' "$1"; fi
+}
+padnum() { # value, width — right-justified, matches the existing %3d style
+    if $pad; then printf "%${2}d" "$1"; else printf '%d' "$1"; fi
+}
+
 # ── Helpers ─────────────────────────────────────────────
 color_for_pct() {
     local pct=$1
@@ -142,6 +164,8 @@ if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git_branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
     if [ -n "$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null)" ]; then
         git_dirty="*"
+    elif $pad; then
+        git_dirty=" "   # hold the column so the line does not shrink when clean
     fi
 fi
 
@@ -170,22 +194,25 @@ fi
 
 line1="${blue}${model_name}${reset}"
 line1+="${sep}"
-line1+="✍️ ${pct_color}${pct_used}%${reset}"
+line1+="✍️ ${pct_color}$(padnum "$pct_used" 3)%${reset}"
 line1+="${sep}"
 line1+="${skip_perms}${cyan}${dirname}${reset}"
 if [ -n "$git_branch" ]; then
-    line1+=" ${green}(${git_branch}${red}${git_dirty}${green})${reset}"
+    # dirty marker sits outside the parens so its slot can be held by a space
+    # when the tree is clean without rendering as "(main )"
+    line1+=" ${green}(${git_branch})${reset}${red}${git_dirty}${reset}"
 fi
 if [ -n "$session_duration" ]; then
     line1+="${sep}"
-    line1+="${dim}⏱ ${reset}${white}${session_duration}${reset}"
+    line1+="${dim}⏱ ${reset}${white}$(padstr "$session_duration" 6)${reset}"
 fi
 line1+="${sep}"
+effort_fmt=$(padstr "$effort" 7)
 case "$effort" in
-    high)   line1+="${magenta}● ${effort}${reset}" ;;
-    medium) line1+="${dim}◑ ${effort}${reset}" ;;
-    low)    line1+="${dim}◔ ${effort}${reset}" ;;
-    *)      line1+="${dim}◑ ${effort}${reset}" ;;
+    high)   line1+="${magenta}● ${effort_fmt}${reset}" ;;
+    medium) line1+="${dim}◑ ${effort_fmt}${reset}" ;;
+    low)    line1+="${dim}◔ ${effort_fmt}${reset}" ;;
+    *)      line1+="${dim}◑ ${effort_fmt}${reset}" ;;
 esac
 
 # ── Rate limits from stdin (primary) ───────────────────
@@ -298,7 +325,8 @@ if [ -n "$five_hour_pct" ]; then
     five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
 
     rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset}"
-    [ -n "$five_hour_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}${five_hour_reset}${reset}"
+    # "9:20pm" (6) vs "10:20pm" (7) — pad so the following fields never shift
+    [ -n "$five_hour_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}$(padstr "$five_hour_reset" 7)${reset}"
 fi
 
 if [ -n "$seven_day_pct" ]; then
@@ -309,7 +337,8 @@ if [ -n "$seven_day_pct" ]; then
 
     [ -n "$rate_lines" ] && rate_lines+="${sep}"
     rate_lines+="${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset}"
-    [ -n "$seven_day_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
+    # "aug 1, 6:00pm" (13) vs "aug 10, 10:00pm" (15)
+    [ -n "$seven_day_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}$(padstr "$seven_day_reset" 15)${reset}"
 fi
 
 if [ "$extra_enabled" = "true" ] && [ -n "$usage_data" ]; then
@@ -325,11 +354,45 @@ if [ "$extra_enabled" = "true" ] && [ -n "$usage_data" ]; then
     fi
 
     [ -n "$rate_lines" ] && rate_lines+="${sep}"
-    rate_lines+="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset} ${dim}⟳${reset} ${white}${extra_reset}${reset}"
+    rate_lines+="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$$(padstr "$extra_used" 6)${dim}/${reset}${white}\$$(padstr "$extra_limit" 6)${reset} ${dim}⟳${reset} ${white}$(padstr "$extra_reset" 6)${reset}"
 fi
 
 # ── Output ──────────────────────────────────────────────
-printf "%b" "$line1"
-[ -n "$rate_lines" ] && printf "%b" "${sep}${rate_lines}"
+out="$line1"
+[ -n "$rate_lines" ] && out+="${sep}${rate_lines}"
+
+rendered=$(printf "%b" "$out")
+
+if $pad; then
+    # The model name, directory and branch have no bounded width — they still
+    # change length when you /model, cd, or check out another branch. So
+    # remember the widest this bar has been and pad back up to it: the string
+    # as a whole can then never get shorter. Trailing spaces are invisible, so
+    # this costs nothing on screen.
+    plain=$(printf '%s' "$rendered" | sed $'s/\033\[[0-9;]*m//g')
+    w=$(printf '%s' "$plain" | wc -m | tr -d ' ')
+
+    state_dir=/tmp/claude
+    mkdir -p "$state_dir" 2>/dev/null
+    sid=$(printf '%s' "$input" | jq -r '.session_id // .session.id // "default"' 2>/dev/null)
+    case "$sid" in ''|null) sid="default" ;; esac
+    sid=$(printf '%s' "$sid" | tr -c 'A-Za-z0-9._-' '_')
+    width_file="$state_dir/statusline-width.$sid"
+
+    max_w=0
+    [ -f "$width_file" ] && max_w=$(cat "$width_file" 2>/dev/null)
+    case "$max_w" in ''|*[!0-9]*) max_w=0 ;; esac
+
+    if [ "$w" -gt "$max_w" ]; then
+        max_w=$w
+        printf '%s' "$w" > "$width_file" 2>/dev/null
+    fi
+
+    n=$(( max_w - w ))
+    [ "$n" -gt 40 ] && n=40   # backstop against one pathological outlier
+    while [ "$n" -gt 0 ]; do rendered+=" "; n=$(( n - 1 )); done
+fi
+
+printf '%s' "$rendered"
 
 exit 0

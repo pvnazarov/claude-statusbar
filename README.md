@@ -5,14 +5,14 @@ A compact, single-line status bar for [Claude Code](https://claude.com/claude-co
 It shows, all on **one line**:
 
 ```
-Opus 4.8 │ ✍️ 18% │ ai (main*) │ ⏱ 12m │ ◑ default │ current ●●●●○○○○○○ 42% ⟳ 10:00pm │ weekly ●○○○○○○○○○ 18% ⟳ jul 30, 10:00am
+Opus 4.8 │ ✍️  18% │ ai (main)* │ ⏱ 12m   │ ◑ default │ current ●●●●○○○○○○  42% ⟳ 10:00pm │ weekly ●○○○○○○○○○  18% ⟳ jul 30, 10:00am
 ```
 
 | Segment | Meaning |
 |---|---|
 | `Opus 4.8` | Active model |
 | `✍️ 18%` | Context window used (turns yellow/red as it fills) |
-| `ai (main*)` | Current directory + git branch (`*` = uncommitted changes) |
+| `ai (main)*` | Current directory + git branch (`*` = uncommitted changes) |
 | `⏱ 12m` | Session duration |
 | `◑ default` | Reasoning effort level |
 | `current …` | 5-hour rate-limit usage + reset time |
@@ -62,6 +62,37 @@ Recent Claude Code versions pass rate-limit info directly on stdin, and the
 script uses that first. If it isn't present, the script falls back to the
 authenticated `oauth/usage` API endpoint and caches the result in
 `/tmp/claude/statusline-usage-cache.json` for 60 seconds so it stays fast.
+
+## Redraw artifacts (leftovers from the previous render)
+
+If the bar shows stale characters — a percentage reading `123%` when it should
+read `12%`, or old text where the new bar has blank space — the cause is that a
+status-line renderer which draws a **shorter** string than last time does not
+necessarily erase the tail of the previous one. It looks like "spaces don't
+paint", but in fact nothing was written over those cells at all.
+
+The script therefore never lets its output shrink: every variable-width field
+is padded to a fixed width (so each field stays at a constant column), and the
+finished line is padded up to the widest it has been this session, tracked in
+`/tmp/claude/statusline-width.<session>`. Trailing spaces are invisible, so
+this costs nothing on screen.
+
+Run with `SL_NO_PAD=1` to disable the padding and compare.
+
+`tools/` holds the diagnostics used to pin this down:
+
+| Tool | What it does |
+|---|---|
+| `term-test.sh` | Draws over itself using spaces vs. cursor-forward vs. `ESC[K`, so you can see which mechanism matches your artifact. Needs a tty. |
+| `width-probe.sh` | Asks your terminal, via cursor-position reports, how wide it *actually* draws each glyph, and measures the real width of a full bar. Flags any mismatch against the naive count. |
+| `redraw-test.sh` | A throwaway status line that marches a gap across a field of `#` — one drawn with spaces, one with dots — to test whether spaces paint inside the panel itself. |
+| `statusline-log.sh` | Transparent wrapper that logs every render with its cell count to `/tmp/claude/statusline-debug.log`. |
+| `select.sh` | Switches `statusLine.command` between the real bar and the harnesses above. |
+
+Worth knowing if you change the glyphs: `●`, `○`, `│` and `◑` are East-Asian
+*Ambiguous* width, meaning the terminal decides whether they occupy one cell or
+two, and `✍️` is an emoji-presentation sequence (U+270D + U+FE0F) that many
+terminals draw two cells wide. `width-probe.sh` will tell you what yours does.
 
 ## Customizing
 

@@ -49,6 +49,13 @@ Key non-obvious facts, each of which has cost real debugging time:
 - Rate limits come from stdin when Claude Code provides them, and otherwise from
   the `oauth/usage` API, cached 60s. **Both paths must keep working**; test each
   separately when touching that logic.
+- **The output must never get shorter than the previous render.** A renderer that
+  draws a shorter string does not necessarily erase the tail of the old one, so
+  stale characters remain on screen — see the "Redraw artifacts" section of the
+  README. Every variable-width field is therefore padded to a fixed width via
+  `padstr`/`padnum`, and the finished line is padded up to the widest seen this
+  session. If you add a segment, pad it; if you change one, keep its width
+  fixed. `SL_NO_PAD=1` disables the padding for comparison.
 
 ## Testing changes
 
