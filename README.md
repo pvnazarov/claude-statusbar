@@ -10,7 +10,7 @@ Opus 4.8 │ ✍️  18% │ ai (main)* │ ⏱ 12m   │ ◑ default │ curren
 
 | Segment | Meaning |
 |---|---|
-| `Opus 4.8` | Active model |
+| `Opus 4.8` | Active model — long-context variants are shortened, so `Opus 5 (1M context)` shows as `Opus 5 (1M)` |
 | `✍️ 18%` | Context window used (turns yellow/red as it fills) |
 | `ai (main)*` | Current directory + git branch (`*` = uncommitted changes) |
 | `⏱ 12m` | Session duration |
@@ -63,6 +63,28 @@ script uses that first. If it isn't present, the script falls back to the
 authenticated `oauth/usage` API endpoint and caches the result in
 `/tmp/claude/statusline-usage-cache.json` for 60 seconds so it stays fast.
 
+That API response has changed shape, and the script reads it in this order:
+
+1. **`limits[]`** — the current form: one self-describing entry per limit,
+   tagged with a `group` (`session` for the 5-hour window, `weekly`) and
+   carrying its own `percent` and `resets_at`.
+2. **The flat `.five_hour` / `.seven_day` keys** — still sent, but no longer
+   always filled in.
+
+The weekly limit is reported **once per scope** — per model and per surface, as
+`seven_day_opus`, `seven_day_cowork` and so on, with plain `.seven_day` left
+`null`. The bar shows whichever scope is furthest along, since that is the one
+that will actually stop you. (Reading only `.seven_day`, as earlier versions
+did, made the weekly meter sit at a permanent `0%`.)
+
+The `weekly` meter therefore reflects one scope, not your account as a whole.
+Inspect the raw response to see them all:
+
+```bash
+jq '.limits, (to_entries[] | select(.key | startswith("seven_day")))' \
+  /tmp/claude/statusline-usage-cache.json
+```
+
 ## Redraw artifacts (leftovers from the previous render)
 
 If the bar shows stale characters — a percentage reading `123%` when it should
@@ -105,6 +127,8 @@ Everything is plain bash. A few common tweaks:
 - **Back to multi-line** — this is the single-line variant. To split the rate
   meters onto their own lines again, change the `${sep}` joins in the
   `── Rate limit lines ──` and `── Output ──` blocks back to `\n`.
+- **Model name** — it is printed as Claude Code reports it, minus the
+  `(1M context)` → `(1M)` shortening applied just after `display_name` is read.
 
 ## Credits
 

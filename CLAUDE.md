@@ -49,6 +49,25 @@ Key non-obvious facts, each of which has cost real debugging time:
 - Rate limits come from stdin when Claude Code provides them, and otherwise from
   the `oauth/usage` API, cached 60s. **Both paths must keep working**; test each
   separately when touching that logic.
+- The API response carries the same numbers in two shapes, and **both fallbacks
+  must keep working** — real accounts are served each of them:
+  - `limits[]`, the current one: an entry per limit with `group`
+    (`session` / `weekly`), `percent` and `resets_at`. Read via `pick_limit`.
+  - the flat `.five_hour` / `.seven_day*` keys.
+
+  A weekly limit appears **once per scope** (`seven_day_opus`,
+  `seven_day_cowork`, …) and plain `.seven_day` is then `null` — reading only
+  that key pinned the weekly meter at 0%. Both paths take the furthest-along
+  entry. Test with `limits[]` present, absent, and malformed; a saved response
+  from `/tmp/claude/statusline-usage-cache.json` edited with `jq` is enough.
+- **`export LC_NUMERIC=C` at the top must stay.** Percentages arrive as `42.6`
+  and are rounded with `printf`/`awk`, which under a comma-decimal locale
+  (`LC_NUMERIC=fr_FR` etc.) reject the dot: bash `printf` errors to stderr —
+  swallowed, so invisible — and `awk` silently truncates, so `42.6` renders as
+  `42%`. It scopes to numbers only; dates still follow `LC_TIME`.
+- `iso_to_epoch` rejects an empty or `null` argument up front, because GNU
+  `date -d ''` resolves to *today at 00:00* rather than failing. Without that
+  guard a missing `resets_at` renders as a convincing past date.
 - **The output must never get shorter than the previous render.** A renderer that
   draws a shorter string does not necessarily erase the tail of the old one, so
   stale characters remain on screen — see the "Redraw artifacts" section of the
@@ -65,3 +84,9 @@ all three input cases by hand and check for empty stderr:
 1. stdin payload **with** `rate_limits` → both meters render
 2. same payload with `rate_limits` removed → meters come from the API fallback
 3. empty stdin → prints the literal `Claude`, exits 0
+
+If you touched the fallback parsing, run case 2 against several shapes of the
+cached response — `limits[]` present, deleted, and set to something that isn't
+an array; weekly present only as `seven_day_<scope>`; `resets_at: null`; no
+weekly data at all. Each must render sane values, omit what it cannot know, and
+leave stderr empty.
