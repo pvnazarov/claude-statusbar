@@ -236,7 +236,7 @@ cat > /tmp/sl-test.json <<'EOF'
 {"model":{"display_name":"Opus 5"},"cwd":"C:/Users/me/proj",
  "context_window":{"context_window_size":200000,
    "current_usage":{"input_tokens":5000,"cache_read_input_tokens":40000,"cache_creation_input_tokens":1000}},
- "session":{"start_time":"2026-07-29T02:00:00Z"},
+ "effort":{"level":"high"},"cost":{"total_duration_ms":1320000},
  "rate_limits":{"five_hour":{"used_percentage":42.5,"resets_at":1785000000},
                 "seven_day":{"used_percentage":11.2,"resets_at":1785400000}}}
 EOF
@@ -247,8 +247,12 @@ EOF
 Expect a full line with both meters and **no error output**:
 
 ```
-Opus 5 │ ✍️ 23% │ proj │ ⏱ 22m │ ◑ default │ current ●●●●○○○○○○  42% ⟳ 7:20pm │ weekly ●○○○○○○○○○  11% ⟳ jul 30, 10:26am
+Opus 5 │ ● high │ proj │ ✍️ 23% │ ⏱ 22m │ 5h ●●●●○○○○○○ 42% ⟳ 19:20 │ 7d ●○○○○○○○○○ 11% ⟳ jul 30
 ```
+
+The two `⟳` values are absolute instants, so they render in your local time
+zone — expect them to differ from the line above. Everything else should match
+exactly.
 
 Three cases worth testing separately:
 

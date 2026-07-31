@@ -90,10 +90,15 @@ Key non-obvious facts, each of which has cost real debugging time:
 - **The output must never get shorter than the previous render.** A renderer that
   draws a shorter string does not necessarily erase the tail of the old one, so
   stale characters remain on screen — see the "Redraw artifacts" section of the
-  README. Every variable-width field is therefore padded to a fixed width via
-  `padstr`/`padnum`, and the finished line is padded up to the widest seen this
-  session. If you add a segment, pad it; if you change one, keep its width
-  fixed. `SL_NO_PAD=1` disables the padding for comparison.
+  README. **The whole defence is one property: the finished line is padded back
+  up to the widest it has been this session.** Nothing else is required —
+  individual fields are deliberately *not* padded, because a render at least as
+  wide as the last one repaints every previously lit cell no matter where the
+  field boundaries fell. Field padding only froze the columns, which is
+  cosmetic, and it cost ~15 cells. So add and reorder segments freely; just do
+  not touch the final pad, and keep its backstop (currently 160) above the
+  widest plausible swing — a vanishing weekly meter alone is ~25 cells.
+  `SL_NO_PAD=1` disables the padding for comparison.
 
 ## Testing changes
 

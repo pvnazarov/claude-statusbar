@@ -36,20 +36,15 @@ sep=" ${dim}│${reset} "
 # reads "value=123456". It looks like "spaces don't paint", but really nothing
 # was written over those cells at all.
 #
-# So: every variable-width field below is padded to a fixed width (keeping each
-# field at a constant column), and the finished line is padded to the widest it
-# has been this session (so the total never shrinks either).
+# What prevents that is one property alone: the total width must never shrink.
+# The finished line is therefore padded back up to the widest it has been this
+# session. Individual fields are NOT padded — that only ever kept columns from
+# shifting sideways, which is cosmetic, and it is where all the wasted space
+# was. Trailing spaces are invisible, so the anti-shrink pad costs nothing.
 #
-# Set SL_NO_PAD=1 to turn this off and compare.
+# Set SL_NO_PAD=1 to turn it off and compare.
 pad=true
 [ "${SL_NO_PAD:-0}" = "1" ] && pad=false
-
-padstr() { # value, width — left-justified, never truncates
-    if $pad; then printf "%-${2}s" "$1"; else printf '%s' "$1"; fi
-}
-padnum() { # value, width — right-justified, matches the existing %3d style
-    if $pad; then printf "%${2}d" "$1"; else printf '%d' "$1"; fi
-}
 
 # ── Helpers ─────────────────────────────────────────────
 color_for_pct() {
@@ -87,14 +82,13 @@ format_epoch_time() {
     local result=""
     case "$style" in
         time)
-            result=$(date -j -r "$epoch" +"%l:%M%p" 2>/dev/null)
-            [ -z "$result" ] && result=$(date -d "@$epoch" +"%l:%M%P" 2>/dev/null)
-            result=$(echo "$result" | sed 's/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]')
+            result=$(date -j -r "$epoch" +"%H:%M" 2>/dev/null)
+            [ -z "$result" ] && result=$(date -d "@$epoch" +"%H:%M" 2>/dev/null)
             ;;
         datetime)
-            result=$(date -j -r "$epoch" +"%b %-d, %l:%M%p" 2>/dev/null)
-            [ -z "$result" ] && result=$(date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null)
-            result=$(echo "$result" | sed 's/  / /g; s/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]')
+            result=$(date -j -r "$epoch" +"%b %-d, %H:%M" 2>/dev/null)
+            [ -z "$result" ] && result=$(date -d "@$epoch" +"%b %-d, %H:%M" 2>/dev/null)
+            result=$(echo "$result" | tr '[:upper:]' '[:lower:]')
             ;;
         *)
             result=$(date -j -r "$epoch" +"%b %-d" 2>/dev/null)
@@ -190,7 +184,7 @@ if [ -z "$effort" ]; then
     fi
 fi
 
-# ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Effort ──
+# ── LINE 1: Model │ Effort │ Directory (branch) │ Context % │ Session ──
 pct_color=$(color_for_pct "$pct_used")
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 [ -z "$cwd" ] || [ "$cwd" = "null" ] && cwd=$(pwd)
@@ -202,8 +196,6 @@ if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git_branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
     if [ -n "$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null)" ]; then
         git_dirty="*"
-    elif $pad; then
-        git_dirty=" "   # hold the column so the line does not shrink when clean
     fi
 fi
 
@@ -246,27 +238,30 @@ if [[ "$parent_cmd" == *"--dangerously-skip-permissions"* ]]; then
 fi
 
 line1="${blue}${model_name}${reset}"
+
 line1+="${sep}"
-line1+="✍️ ${pct_color}$(padnum "$pct_used" 3)%${reset}"
-line1+="${sep}"
-line1+="${skip_perms}${cyan}${dirname}${reset}"
-if [ -n "$git_branch" ]; then
-    # dirty marker sits outside the parens so its slot can be held by a space
-    # when the tree is clean without rendering as "(main )"
-    line1+=" ${green}(${git_branch})${reset}${red}${git_dirty}${reset}"
-fi
-if [ -n "$session_duration" ]; then
-    line1+="${sep}"
-    line1+="${dim}⏱ ${reset}${white}$(padstr "$session_duration" 6)${reset}"
-fi
-line1+="${sep}"
-effort_fmt=$(padstr "$effort" 7)
+effort_fmt="$effort"
 case "$effort" in
     high)   line1+="${magenta}● ${effort_fmt}${reset}" ;;
     medium) line1+="${dim}◑ ${effort_fmt}${reset}" ;;
     low)    line1+="${dim}◔ ${effort_fmt}${reset}" ;;
     *)      line1+="${dim}◑ ${effort_fmt}${reset}" ;;
 esac
+
+line1+="${sep}"
+line1+="${skip_perms}${cyan}${dirname}${reset}"
+if [ -n "$git_branch" ]; then
+    # dirty marker sits outside the parens so it does not render as "(main )"
+    line1+=" ${green}(${git_branch})${reset}${red}${git_dirty}${reset}"
+fi
+
+line1+="${sep}"
+line1+="✍️ ${pct_color}${pct_used}%${reset}"
+
+if [ -n "$session_duration" ]; then
+    line1+="${sep}"
+    line1+="${dim}⏱ ${reset}${white}${session_duration}${reset}"
+fi
 
 # ── Rate limits from stdin (primary) ───────────────────
 # Taken one limit at a time, because Claude Code sends whichever it has: the
@@ -410,23 +405,21 @@ if [ -n "$five_hour_pct" ]; then
     five_hour_reset=$(format_epoch_time "$five_hour_reset_epoch" "time")
     five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
     five_hour_pct_color=$(color_for_pct "$five_hour_pct")
-    five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
+    five_hour_pct_fmt="$five_hour_pct"
 
-    rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset}"
-    # "9:20pm" (6) vs "10:20pm" (7) — pad so the following fields never shift
-    [ -n "$five_hour_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}$(padstr "$five_hour_reset" 7)${reset}"
+    rate_lines+="${red}5h${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset}"
+    [ -n "$five_hour_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}${five_hour_reset}${reset}"
 fi
 
 if [ -n "$seven_day_pct" ]; then
-    seven_day_reset=$(format_epoch_time "$seven_day_reset_epoch" "datetime")
+    seven_day_reset=$(format_epoch_time "$seven_day_reset_epoch" "date")
     seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width")
     seven_day_pct_color=$(color_for_pct "$seven_day_pct")
-    seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
+    seven_day_pct_fmt="$seven_day_pct"
 
     [ -n "$rate_lines" ] && rate_lines+="${sep}"
-    rate_lines+="${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset}"
-    # "aug 1, 6:00pm" (13) vs "aug 10, 10:00pm" (15)
-    [ -n "$seven_day_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}$(padstr "$seven_day_reset" 15)${reset}"
+    rate_lines+="${red}7d${reset} ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset}"
+    [ -n "$seven_day_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
 fi
 
 if [ "$extra_enabled" = "true" ] && [ -n "$usage_data" ]; then
@@ -442,7 +435,7 @@ if [ "$extra_enabled" = "true" ] && [ -n "$usage_data" ]; then
     fi
 
     [ -n "$rate_lines" ] && rate_lines+="${sep}"
-    rate_lines+="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$$(padstr "$extra_used" 6)${dim}/${reset}${white}\$$(padstr "$extra_limit" 6)${reset} ${dim}⟳${reset} ${white}$(padstr "$extra_reset" 6)${reset}"
+    rate_lines+="${white}extra${reset} ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset} ${dim}⟳${reset} ${white}${extra_reset}${reset}"
 fi
 
 # ── Output ──────────────────────────────────────────────
@@ -477,7 +470,11 @@ if $pad; then
     fi
 
     n=$(( max_w - w ))
-    [ "$n" -gt 40 ] && n=40   # backstop against one pathological outlier
+    # Without per-field padding the natural width swings much further — a
+    # vanishing weekly meter alone is ~25 cells — so this backstop, which only
+    # exists to stop one pathological outlier from padding forever, has to sit
+    # well above the widest plausible swing.
+    [ "$n" -gt 160 ] && n=160
     while [ "$n" -gt 0 ]; do rendered+=" "; n=$(( n - 1 )); done
 fi
 

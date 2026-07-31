@@ -5,18 +5,18 @@ A compact, single-line status bar for [Claude Code](https://claude.com/claude-co
 It shows, all on **one line**:
 
 ```
-Opus 4.8 │ ✍️  18% │ ai (main)* │ ⏱ 12m   │ ◑ default │ current ●●●●○○○○○○  42% ⟳ 10:00pm │ weekly ●○○○○○○○○○  18% ⟳ jul 30, 10:00am
+Opus 5 (1M) │ ● high │ ai (main)* │ ✍️ 9% │ ⏱ 20m │ 5h ●●○○○○○○○○ 22% ⟳ 21:50 │ 7d ●●●●○○○○○○ 43% ⟳ aug 3
 ```
 
 | Segment | Meaning |
 |---|---|
-| `Opus 4.8` | Active model — long-context variants are shortened, so `Opus 5 (1M context)` shows as `Opus 5 (1M)` |
-| `✍️ 18%` | Context window used (turns yellow/red as it fills) |
+| `Opus 5 (1M)` | Active model — long-context variants are shortened, so `Opus 5 (1M context)` shows as `Opus 5 (1M)` |
+| `● high` | Reasoning effort level, as Claude Code reports it on stdin |
 | `ai (main)*` | Current directory + git branch (`*` = uncommitted changes) |
-| `⏱ 12m` | Session duration (from `cost.total_duration_ms`) |
-| `◑ default` | Reasoning effort level, as Claude Code reports it on stdin |
-| `current …` | 5-hour rate-limit usage + reset time |
-| `weekly …` | 7-day rate-limit usage + reset time |
+| `✍️ 9%` | Context window used (turns yellow/red as it fills) |
+| `⏱ 20m` | Session duration (from `cost.total_duration_ms`) |
+| `5h …` | 5-hour rate-limit usage + reset time (24h clock) |
+| `7d …` | Weekly rate-limit usage + reset date |
 | `extra …` | Extra-usage credits (only shown if enabled) |
 
 Colors: green → orange → yellow → red as any meter fills.
@@ -98,11 +98,16 @@ status-line renderer which draws a **shorter** string than last time does not
 necessarily erase the tail of the previous one. It looks like "spaces don't
 paint", but in fact nothing was written over those cells at all.
 
-The script therefore never lets its output shrink: every variable-width field
-is padded to a fixed width (so each field stays at a constant column), and the
-finished line is padded up to the widest it has been this session, tracked in
+The script therefore never lets its output shrink: the finished line is padded
+up to the widest it has been this session, tracked in
 `/tmp/claude/statusline-width.<session>`. Trailing spaces are invisible, so
 this costs nothing on screen.
+
+That total width is the whole defence. Individual fields are *not* padded — a
+render at least as wide as the last one repaints every previously lit cell
+wherever the field boundaries happen to fall, so fixed-width fields only ever
+kept columns from shifting sideways. The trade is that fields do now shift as
+values change width, which is cosmetic, and it buys back about 15 cells.
 
 Run with `SL_NO_PAD=1` to disable the padding and compare.
 
