@@ -46,9 +46,28 @@ Key non-obvious facts, each of which has cost real debugging time:
 - `ps -o args=` (used to show a `⚡` for `--dangerously-skip-permissions`) is
   unsupported by Git Bash's `ps`. It fails silently and the indicator simply
   never appears. This is intentional and harmless — not a bug to fix.
+- **Do not assume a field is on stdin — check against
+  [`tools/sample-payload.json`](tools/sample-payload.json)**, a real capture
+  (Claude Code 2.1.220). Three fields were being read from places that no longer
+  hold them, and each failed by rendering something plausible instead of
+  nothing:
+
+  | Wanted | Not here | Actually here |
+  |---|---|---|
+  | weekly rate limit | `rate_limits.seven_day` — absent, only `five_hour` is sent | the `oauth/usage` API |
+  | effort level | `.effortLevel` in `settings.json`, unset unless pinned → always read `default` | `.effort.level` |
+  | session duration | `.session.start_time` — no `session` key at all | `.cost.total_duration_ms` |
+
+  Re-capture with `tools/statusline-log.sh` (set `SL_LOG_INPUT=1`) when a new
+  Claude Code version lands; the shape does drift. Unused fields currently
+  available: `model.id`, `fast_mode`, `thinking.enabled`, `exceeds_200k_tokens`,
+  `output_style.name`, `session_name`, `context_window.used_percentage`.
 - Rate limits come from stdin when Claude Code provides them, and otherwise from
   the `oauth/usage` API, cached 60s. **Both paths must keep working**; test each
-  separately when touching that logic.
+  separately when touching that logic. Sourcing is **per meter**, not
+  all-or-nothing: stdin supplies `five_hour` only, so the API request runs on
+  ordinary renders and is what feeds the weekly meter. Anything stdin provides
+  must win over the cache, which can be up to 60s stale.
 - The API response carries the same numbers in two shapes, and **both fallbacks
   must keep working** — real accounts are served each of them:
   - `limits[]`, the current one: an entry per limit with `group`
@@ -81,8 +100,8 @@ Key non-obvious facts, each of which has cost real debugging time:
 There is no test suite. Before committing a change to `statusline.sh`, exercise
 all three input cases by hand and check for empty stderr:
 
-1. stdin payload **with** `rate_limits` → both meters render
-2. same payload with `rate_limits` removed → meters come from the API fallback
+1. `tools/sample-payload.json` → the whole bar, weekly meter included
+2. same payload with `rate_limits` removed → both meters come from the API
 3. empty stdin → prints the literal `Claude`, exits 0
 
 If you touched the fallback parsing, run case 2 against several shapes of the

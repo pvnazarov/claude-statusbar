@@ -178,10 +178,16 @@ else
     pct_used=0
 fi
 
-effort="default"
-settings_path="$HOME/.claude/settings.json"
-if [ -f "$settings_path" ]; then
-    effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+# Claude Code reports the effort level on stdin. `.effortLevel` in settings.json
+# is only written when you pin one there, so reading it alone made the bar say
+# "default" no matter what was actually in effect.
+effort=$(echo "$input" | jq -r '.effort.level // empty')
+if [ -z "$effort" ]; then
+    effort="default"
+    settings_path="$HOME/.claude/settings.json"
+    if [ -f "$settings_path" ]; then
+        effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+    fi
 fi
 
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Effort ──
@@ -201,20 +207,35 @@ if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fi
 fi
 
+# Two possible sources, because Claude Code no longer sends
+# `session.start_time` — `cost.total_duration_ms` is the wall clock it reports
+# now. Relying on the old key alone meant the timer never appeared at all.
 session_duration=""
+elapsed=""
+
 session_start=$(echo "$input" | jq -r '.session.start_time // empty')
 if [ -n "$session_start" ] && [ "$session_start" != "null" ]; then
     start_epoch=$(iso_to_epoch "$session_start")
-    if [ -n "$start_epoch" ]; then
-        now_epoch=$(date +%s)
-        elapsed=$(( now_epoch - start_epoch ))
-        if [ "$elapsed" -ge 3600 ]; then
-            session_duration="$(( elapsed / 3600 ))h$(( (elapsed % 3600) / 60 ))m"
-        elif [ "$elapsed" -ge 60 ]; then
-            session_duration="$(( elapsed / 60 ))m"
-        else
-            session_duration="${elapsed}s"
-        fi
+    [ -n "$start_epoch" ] && elapsed=$(( $(date +%s) - start_epoch ))
+fi
+
+if [ -z "$elapsed" ]; then
+    duration_ms=$(echo "$input" | jq -r '.cost.total_duration_ms // empty | floor' 2>/dev/null)
+    case "$duration_ms" in
+        ''|*[!0-9]*) ;;
+        *) elapsed=$(( duration_ms / 1000 )) ;;
+    esac
+fi
+
+# A clock skew between the two machines can make that negative; show nothing
+# rather than "⏱ -42m".
+if [ -n "$elapsed" ] && [ "$elapsed" -ge 0 ] 2>/dev/null; then
+    if [ "$elapsed" -ge 3600 ]; then
+        session_duration="$(( elapsed / 3600 ))h$(( (elapsed % 3600) / 60 ))m"
+    elif [ "$elapsed" -ge 60 ]; then
+        session_duration="$(( elapsed / 60 ))m"
+    else
+        session_duration="${elapsed}s"
     fi
 fi
 
@@ -248,7 +269,11 @@ case "$effort" in
 esac
 
 # ── Rate limits from stdin (primary) ───────────────────
-has_stdin_rates=false
+# Taken one limit at a time, because Claude Code sends whichever it has: the
+# payload currently carries `five_hour` and no `seven_day` at all. Treating
+# stdin as all-or-nothing meant a present `five_hour` suppressed the API call
+# that is the only source of the weekly figure, so the weekly meter never
+# rendered.
 five_hour_pct=""
 five_hour_reset_epoch=""
 seven_day_pct=""
@@ -256,14 +281,19 @@ seven_day_reset_epoch=""
 
 stdin_five_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
 if [ -n "$stdin_five_pct" ]; then
-    has_stdin_rates=true
-    five_hour_pct=$(printf "%.0f" "$stdin_five_pct")
+    five_hour_pct=$(printf '%s' "$stdin_five_pct" | awk '{printf "%.0f", $1}')
     five_hour_reset_epoch=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
-    seven_day_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty' | awk '{printf "%.0f", $1}')
+fi
+
+stdin_seven_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+if [ -n "$stdin_seven_pct" ]; then
+    seven_day_pct=$(printf '%s' "$stdin_seven_pct" | awk '{printf "%.0f", $1}')
     seven_day_reset_epoch=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
 fi
 
 # ── Fallback: API call (cached) ────────────────────────
+# Consulted for whichever meters stdin did not supply — in practice the weekly
+# one, every render. The 60s cache keeps that to one request a minute.
 cache_file="/tmp/claude/statusline-usage-cache.json"
 cache_max_age=60
 mkdir -p /tmp/claude
@@ -271,7 +301,7 @@ mkdir -p /tmp/claude
 usage_data=""
 extra_enabled="false"
 
-if ! $has_stdin_rates; then
+if [ -z "$five_hour_pct" ] || [ -z "$seven_day_pct" ]; then
     needs_refresh=true
 
     if [ -f "$cache_file" ]; then
@@ -327,7 +357,16 @@ if ! $has_stdin_rates; then
         fi
     fi
 
-    if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
+elif [ -f "$cache_file" ]; then
+    # Both meters came from stdin. No request — but the cached response still
+    # says whether extra usage is enabled.
+    usage_data=$(cat "$cache_file" 2>/dev/null)
+fi
+
+if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
+    # Only ever fills the gaps: anything stdin already provided wins, as it is
+    # live where this is up to 60s old.
+    if [ -z "$five_hour_pct" ]; then
         five=$(pick_limit session)
         if [ -n "$five" ]; then
             five_hour_pct=$(printf '%s' "${five%%$'\t'*}" | awk '{printf "%.0f", $1}')
@@ -336,7 +375,9 @@ if ! $has_stdin_rates; then
             five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
             five_hour_reset_epoch=$(iso_to_epoch "$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')")
         fi
+    fi
 
+    if [ -z "$seven_day_pct" ]; then
         week=$(pick_limit weekly)
         if [ -n "$week" ]; then
             seven_day_pct=$(printf '%s' "${week%%$'\t'*}" | awk '{printf "%.0f", $1}')
@@ -356,16 +397,9 @@ if ! $has_stdin_rates; then
                 seven_day_reset_epoch=$(iso_to_epoch "$(echo "$weekly_legacy" | jq -r '.resets_at // empty')")
             fi
         fi
+    fi
 
-        extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
-    fi
-else
-    if [ -f "$cache_file" ]; then
-        usage_data=$(cat "$cache_file" 2>/dev/null)
-        if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
-            extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
-        fi
-    fi
+    extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
 fi
 
 # ── Rate limit lines ────────────────────────────────────

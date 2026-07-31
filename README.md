@@ -13,8 +13,8 @@ Opus 4.8 │ ✍️  18% │ ai (main)* │ ⏱ 12m   │ ◑ default │ curren
 | `Opus 4.8` | Active model — long-context variants are shortened, so `Opus 5 (1M context)` shows as `Opus 5 (1M)` |
 | `✍️ 18%` | Context window used (turns yellow/red as it fills) |
 | `ai (main)*` | Current directory + git branch (`*` = uncommitted changes) |
-| `⏱ 12m` | Session duration |
-| `◑ default` | Reasoning effort level |
+| `⏱ 12m` | Session duration (from `cost.total_duration_ms`) |
+| `◑ default` | Reasoning effort level, as Claude Code reports it on stdin |
 | `current …` | 5-hour rate-limit usage + reset time |
 | `weekly …` | 7-day rate-limit usage + reset time |
 | `extra …` | Extra-usage credits (only shown if enabled) |
@@ -59,9 +59,14 @@ Colors: green → orange → yellow → red as any meter fills.
 ## How rate-limit data works
 
 Recent Claude Code versions pass rate-limit info directly on stdin, and the
-script uses that first. If it isn't present, the script falls back to the
-authenticated `oauth/usage` API endpoint and caches the result in
+script uses that first — **one meter at a time**. Whatever stdin omits comes
+from the authenticated `oauth/usage` API endpoint, cached in
 `/tmp/claude/statusline-usage-cache.json` for 60 seconds so it stays fast.
+
+That distinction matters: as of Claude Code 2.1.220 the payload carries
+`five_hour` and no `seven_day` whatsoever, so the weekly meter is *always* the
+API's. Treating stdin as all-or-nothing — where any stdin data suppressed the
+request — is what made the weekly meter silently vanish.
 
 That API response has changed shape, and the script reads it in this order:
 
