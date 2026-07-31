@@ -1,6 +1,13 @@
 #!/bin/bash
 set -f
 
+# Percentages arrive as "42.6" and are rounded with printf/awk. Under a locale
+# whose decimal separator is a comma (LC_NUMERIC=fr_FR etc.) both reject the
+# dot: bash printf errors to stderr — which Claude Code swallows — and awk
+# silently truncates, so 42.6 renders as 42%. Force C for numbers only; dates
+# still follow LC_TIME.
+export LC_NUMERIC=C
+
 input=$(cat)
 
 if [ -z "$input" ]; then
@@ -98,8 +105,29 @@ format_epoch_time() {
     printf "%s" "$result"
 }
 
+# `usage_data.limits[]` is the current shape of the oauth/usage response: one
+# self-describing entry per limit, tagged with a `group` ("session" for the
+# 5-hour window, "weekly") and carrying its own `percent` and `resets_at`. It
+# replaces the flat `.five_hour` / `.seven_day*` keys, which the API still sends
+# but no longer always fills in.
+#
+# A group can hold several entries — the weekly limit is reported once per scope
+# (per model, per surface) — so take the one furthest along: that is the one
+# that will actually stop you.
+pick_limit() { # group name → "<percent>\t<resets_at>", empty if the group is absent
+    printf '%s' "$usage_data" | jq -r --arg g "$1" '
+        [ .limits[]? | select(type == "object" and .group == $g and .percent != null) ]
+        | max_by(.percent)
+        | select(. != null)
+        | "\(.percent)\t\(.resets_at // "")"' 2>/dev/null
+}
+
 iso_to_epoch() {
     local iso_str="$1"
+
+    # GNU `date -d ''` means "today at 00:00" rather than failing, so an absent
+    # timestamp would render as a plausible-looking past date. Reject it here.
+    case "$iso_str" in ''|null) return 1 ;; esac
 
     local epoch
     epoch=$(date -d "${iso_str}" +%s 2>/dev/null)
@@ -131,6 +159,10 @@ iso_to_epoch() {
 
 # ── Extract JSON data ───────────────────────────────────
 model_name=$(echo "$input" | jq -r '.model.display_name // "Claude"')
+# Long-context variants come through as e.g. "Opus 5 (1M context)". The word
+# adds nothing here and it is the widest model string there is, so it sets the
+# padding floor for the whole bar — shorten it to "Opus 5 (1M)".
+model_name="${model_name/ context)/)}"
 
 size=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
 [ "$size" -eq 0 ] 2>/dev/null && size=200000
@@ -296,12 +328,34 @@ if ! $has_stdin_rates; then
     fi
 
     if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
-        five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
-        five_hour_reset_iso=$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')
-        five_hour_reset_epoch=$(iso_to_epoch "$five_hour_reset_iso")
-        seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
-        seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
-        seven_day_reset_epoch=$(iso_to_epoch "$seven_day_reset_iso")
+        five=$(pick_limit session)
+        if [ -n "$five" ]; then
+            five_hour_pct=$(printf '%s' "${five%%$'\t'*}" | awk '{printf "%.0f", $1}')
+            five_hour_reset_epoch=$(iso_to_epoch "${five#*$'\t'}")
+        else
+            five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
+            five_hour_reset_epoch=$(iso_to_epoch "$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')")
+        fi
+
+        week=$(pick_limit weekly)
+        if [ -n "$week" ]; then
+            seven_day_pct=$(printf '%s' "${week%%$'\t'*}" | awk '{printf "%.0f", $1}')
+            seven_day_reset_epoch=$(iso_to_epoch "${week#*$'\t'}")
+        else
+            # Legacy shape. `.seven_day` itself is null on accounts whose weekly
+            # limit is reported per scope (`seven_day_opus`, `seven_day_cowork`,
+            # …), which used to read as a flat 0% — so scan all of them.
+            weekly_legacy=$(echo "$usage_data" | jq -c '
+                [ to_entries[]
+                  | select(.key | startswith("seven_day"))
+                  | .value
+                  | select(type == "object" and .utilization != null) ]
+                | max_by(.utilization) // empty')
+            if [ -n "$weekly_legacy" ]; then
+                seven_day_pct=$(echo "$weekly_legacy" | jq -r '.utilization' | awk '{printf "%.0f", $1}')
+                seven_day_reset_epoch=$(iso_to_epoch "$(echo "$weekly_legacy" | jq -r '.resets_at // empty')")
+            fi
+        fi
 
         extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
     fi
