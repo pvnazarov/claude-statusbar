@@ -407,7 +407,7 @@ if [ -n "$five_hour_pct" ]; then
     five_hour_pct_color=$(color_for_pct "$five_hour_pct")
     five_hour_pct_fmt="$five_hour_pct"
 
-    rate_lines+="${red}5h${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset}"
+    rate_lines+="${orange}5h${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset}"
     [ -n "$five_hour_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}${five_hour_reset}${reset}"
 fi
 
@@ -418,7 +418,7 @@ if [ -n "$seven_day_pct" ]; then
     seven_day_pct_fmt="$seven_day_pct"
 
     [ -n "$rate_lines" ] && rate_lines+="${sep}"
-    rate_lines+="${red}7d${reset} ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset}"
+    rate_lines+="${orange}7d${reset} ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset}"
     [ -n "$seven_day_reset" ] && rate_lines+=" ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
 fi
 
