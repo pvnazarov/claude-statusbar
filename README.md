@@ -5,13 +5,12 @@ A compact, single-line status bar for [Claude Code](https://claude.com/claude-co
 It shows, all on **one line**:
 
 ```
-Opus 5 (1M) │ ● high │ ai (main)* │ ✍️ 9% │ ⏱ 20m │ 5h ●●○○○○○○○○ 22% ⟳ 21:50 │ 7d ●●●●○○○○○○ 43% ⟳ aug 3
+Opus 5 (1M) high │ ai (main)* │ ✍️ 9% │ ⏱ 20m │ 5h ●●○○○○○○○○ 22% ⟳ 21:50 │ 7d ●●●●○○○○○○ 43% ⟳ aug 3
 ```
 
 | Segment | Meaning |
 |---|---|
-| `Opus 5 (1M)` | Active model — long-context variants are shortened, so `Opus 5 (1M context)` shows as `Opus 5 (1M)` |
-| `● high` | Reasoning effort level, as Claude Code reports it on stdin |
+| `Opus 5 (1M) high` | Active model and reasoning effort. They share a segment and are told apart by colour; the effort level comes from stdin. Long-context variants are shortened, so `Opus 5 (1M context)` shows as `Opus 5 (1M)` |
 | `ai (main)*` | Current directory + git branch (`*` = uncommitted changes) |
 | `✍️ 9%` | Context window used (turns yellow/red as it fills) |
 | `⏱ 20m` | Session duration (from `cost.total_duration_ms`) |

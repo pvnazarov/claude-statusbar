@@ -26,14 +26,17 @@ reads like a bug in the script when it isn't.
 
 This is the one that cost the most time, and it is genuinely counter-intuitive.
 
-The script parses **every** value with `jq` — model name, context %, and both
-rate-limit meters. With `jq` missing, each call fails and each variable becomes
-empty. The rate-limit block is guarded by `if [ -n "$five_hour_pct" ]`, so it is
-skipped entirely and you get:
+The script parses **every** value with `jq` — model name, effort, context %,
+session duration and both rate-limit meters. With `jq` missing, each call fails
+and each variable becomes empty. The rate-limit block is guarded by
+`if [ -n "$five_hour_pct" ]`, so it is skipped entirely and you get:
 
 ```
-(blank) │ ✍️ 0% │ ai │ ◑ default
+ │ ai (main) │ ✍️ 0%
 ```
+
+Only the directory and its branch survive, because those come from `git` rather
+than from the payload. The leading space is the empty model-and-effort segment.
 
 Two compounding reasons `jq` can be missing even when it's installed:
 
@@ -247,7 +250,7 @@ EOF
 Expect a full line with both meters and **no error output**:
 
 ```
-Opus 5 │ ● high │ proj │ ✍️ 23% │ ⏱ 22m │ 5h ●●●●○○○○○○ 42% ⟳ 19:20 │ 7d ●○○○○○○○○○ 11% ⟳ jul 30
+Opus 5 high │ proj │ ✍️ 23% │ ⏱ 22m │ 5h ●●●●○○○○○○ 42% ⟳ 19:20 │ 7d ●○○○○○○○○○ 11% ⟳ jul 30
 ```
 
 The two `⟳` values are absolute instants, so they render in your local time

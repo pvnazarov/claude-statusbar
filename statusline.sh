@@ -184,7 +184,7 @@ if [ -z "$effort" ]; then
     fi
 fi
 
-# ── LINE 1: Model │ Effort │ Directory (branch) │ Context % │ Session ──
+# ── LINE 1: Model + Effort │ Directory (branch) │ Context % │ Session ──
 pct_color=$(color_for_pct "$pct_used")
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 [ -z "$cwd" ] || [ "$cwd" = "null" ] && cwd=$(pwd)
@@ -237,15 +237,17 @@ if [[ "$parent_cmd" == *"--dangerously-skip-permissions"* ]]; then
     skip_perms="⚡  "
 fi
 
+# Model and effort read as one phrase ("Opus 5 (1M) high"), so they share a
+# segment; their colours keep them distinguishable without a divider.
 line1="${blue}${model_name}${reset}"
 
-line1+="${sep}"
+line1+=" "
 effort_fmt="$effort"
 case "$effort" in
-    high)   line1+="${magenta}● ${effort_fmt}${reset}" ;;
-    medium) line1+="${dim}◑ ${effort_fmt}${reset}" ;;
-    low)    line1+="${dim}◔ ${effort_fmt}${reset}" ;;
-    *)      line1+="${dim}◑ ${effort_fmt}${reset}" ;;
+    high)   line1+="${magenta}${effort_fmt}${reset}" ;;
+    medium) line1+="${dim}${effort_fmt}${reset}" ;;
+    low)    line1+="${dim}${effort_fmt}${reset}" ;;
+    *)      line1+="${dim}${effort_fmt}${reset}" ;;
 esac
 
 line1+="${sep}"
